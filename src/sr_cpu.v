@@ -26,6 +26,8 @@ module sr_cpu
     wire        aluSrc;
     wire        wdSrc;
     wire  [2:0] aluControl;
+    wire        lifo_en;
+    wire        lifo_mode;
 
     //instruction decode wires
     wire [ 6:0] cmdOp;
@@ -96,8 +98,24 @@ module sr_cpu
         .zero       ( aluZero      ),
         .result     ( aluResult    ) 
     );
+    
+    //stack
+    wire [15:0] lifo_out;
 
-    assign wd3 = wdSrc ? immU : aluResult;
+    lifo stack (
+        .clk        ( clk          ),
+        .rst        ( rst_n        ), 
+        .en         ( lifo_en      ),
+        .mode       ( lifo_mode    ),
+        .data_i     ( rd1[15:0]    ),
+        .empty      ( ),
+        .full       ( ),
+        .data_o     ( lifo_out     ),
+	    .amount     ( )
+    );
+
+    wire [31:0] lifoOrAlu = lifo_en ? lifo_out : aluResult;
+    assign wd3 = wdSrc ? immU : lifoOrAlu;
 
     //control
     sr_control sm_control (
@@ -109,7 +127,9 @@ module sr_cpu
         .regWrite   ( regWrite     ),
         .aluSrc     ( aluSrc       ),
         .wdSrc      ( wdSrc        ),
-        .aluControl ( aluControl   ) 
+        .aluControl ( aluControl   ),
+        .lifo_en    ( lifo_en      ),
+        .lifo_mode  ( lifo_mode    ) 
     );
 
 endmodule
@@ -167,7 +187,9 @@ module sr_control
     output reg       regWrite, 
     output reg       aluSrc,
     output reg       wdSrc,
-    output reg [2:0] aluControl
+    output reg [2:0] aluControl,
+    output reg       lifo_en,
+    output reg       lifo_mode
 );
     reg          branch;
     reg          condZero;
@@ -180,6 +202,9 @@ module sr_control
         aluSrc      = 1'b0;
         wdSrc       = 1'b0;
         aluControl  = `ALU_ADD;
+        
+        lifo_en = 1'b0;
+        lifo_mode = 1'b0;
 
         casez( {cmdF7, cmdF3, cmdOp} )
             { `RVF7_ADD,  `RVF3_ADD,  `RVOP_ADD  } : begin regWrite = 1'b1; aluControl = `ALU_ADD;  end
@@ -193,6 +218,9 @@ module sr_control
 
             { `RVF7_ANY,  `RVF3_BEQ,  `RVOP_BEQ  } : begin branch = 1'b1; condZero = 1'b1; aluControl = `ALU_SUB; end
             { `RVF7_ANY,  `RVF3_BNE,  `RVOP_BNE  } : begin branch = 1'b1; aluControl = `ALU_SUB; end
+            
+            { `RVF7_ANY,  `RVF3_PUSH, `RVOP_PUSH } : begin lifo_en = 1'b1; lifo_mode = 1'b1; end
+            { `RVF7_ANY,  `RVF3_POP,  `RVOP_POP  } : begin regWrite = 1'b1; lifo_en = 1'b1; end
         endcase
     end
 endmodule
